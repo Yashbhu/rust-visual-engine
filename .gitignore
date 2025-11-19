@@ -1,0 +1,17 @@
+# Model weights
+# explicit names the user requested
+yolov9n.pt
+yolov8.spt
+
+# Common YOLO weights (keep both specific and wildcard just in case)
+# this also ignores the existing yolov8n.pt / yolov8s.pt files
+*.pt
+
+# Cargo / Rust build artifacts
+Cargo.lock
+/target/
+
+# macOS
+.DS_Store
+frames/
+processed/
