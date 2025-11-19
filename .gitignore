@@ -14,4 +14,4 @@ Cargo.lock
 # macOS
 .DS_Store
 frames/
-processed/
+processed/input.mp4
