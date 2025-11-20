@@ -35,7 +35,7 @@ def read_gray(path):
     return img
 
 def hough_circles(img):
-    # Pre-blur to reduce noise
+
     bl = cv2.medianBlur(img, 7)
     h, w = img.shape[:2]
     dp = 1.2
@@ -47,17 +47,17 @@ def hough_circles(img):
     if circles is None:
         return []
     circles = np.round(circles[0, :]).astype(int)
-    # sort by radius desc
+    
     circles = sorted(circles.tolist(), key=lambda c: c[2], reverse=True)
     return circles
 
 def contour_circular_candidates(img):
-    # fallback: find contours in lower half; choose contours with high circularity
+
     h, w = img.shape[:2]
-    area_thresh = (w*h) * 0.001  # tuneable
+    area_thresh = (w*h) * 0.001
     half = h // 2
     roi = img[half:, :]
-    # edge -> dilate -> contours
+    
     edges = cv2.Canny(roi, 50, 150)
     edges = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
     cnts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -70,20 +70,20 @@ def contour_circular_candidates(img):
         if perimeter <= 0:
             continue
         circularity = 4 * math.pi * a / (perimeter * perimeter)
-        if circularity > 0.5:  # 0..1; higher is more circle-like
+        if circularity > 0.5: 
             (x, y, cw, ch) = cv2.boundingRect(c)
-            # convert roi coords to full image coords
+            
             candidates.append((x, y+half, cw, ch, circularity))
-    # sort by circularity then area
+    
     candidates = sorted(candidates, key=lambda t: (t[4], t[2]*t[3]), reverse=True)
     return candidates
 
 def choose_tire_roi(prev, curr):
-    # Try Hough on prev (prefer prev because tire may be missing in curr)
+    
     pcir = hough_circles(prev)
     if len(pcir) > 0:
         x, y, r = pcir[0]
-        # build square ROI around circle with margin
+        
         margin = int(r * 1.4)
         x1 = max(0, x - margin)
         y1 = max(0, y - margin)
@@ -91,7 +91,7 @@ def choose_tire_roi(prev, curr):
         y2 = min(prev.shape[0]-1, y + margin)
         return ("circle", (x1,y1,x2-x1,y2-y1), r, 0.0)
 
-    # If Hough failed on prev, try curr
+
     ccir = hough_circles(curr)
     if len(ccir) > 0:
         x, y, r = ccir[0]
@@ -100,14 +100,14 @@ def choose_tire_roi(prev, curr):
         y1 = max(0, y - margin)
         x2 = min(prev.shape[1]-1, x + margin)
         y2 = min(prev.shape[0]-1, y + margin)
-        # radius 0.0 for prev (we'll still analyze)
+    
         return ("circle", (x1,y1,x2-x1,y2-y1), 0.0, r)
 
-    # fallback: contour circular candidates (lower half)
+
     candidates = contour_circular_candidates(prev)
     if len(candidates) > 0:
         x, y, cw, ch, circ = candidates[0]
-        # slightly expand
+
         pad = int(max(cw, ch) * 0.25)
         x1 = max(0, x - pad)
         y1 = max(0, y - pad)
@@ -115,7 +115,7 @@ def choose_tire_roi(prev, curr):
         y2 = min(prev.shape[0]-1, y + ch + pad)
         return ("contour", (x1,y1,x2-x1,y2-y1), circ, 0.0)
 
-    # if nothing found, return None -> caller will use global
+
     return (None, None, 0.0, 0.0)
 
 def compute_ssim(a, b):
@@ -162,7 +162,7 @@ def crop_and_resize(img, bbox, size):
     return cv2.resize(c, (size, size), interpolation=cv2.INTER_LINEAR)
 
 def global_metrics(prev, curr, size=512):
-    # compute global metrics resized to same size
+    
     p = cv2.resize(prev, (size,size), interpolation=cv2.INTER_LINEAR)
     c = cv2.resize(curr, (size,size), interpolation=cv2.INTER_LINEAR)
     s = compute_ssim(p,c)
@@ -179,7 +179,7 @@ def main():
     prev = read_gray(prev_p)
     curr = read_gray(curr_p)
 
-    # ensure same size
+    
     if prev.shape != curr.shape:
         curr = cv2.resize(curr, (prev.shape[1], prev.shape[0]), interpolation=cv2.INTER_LINEAR)
 
@@ -187,11 +187,10 @@ def main():
 
     metrics = {}
     if method is not None and bbox is not None:
-        # crop ROI from both images and compute metrics there
         roi_prev = crop_and_resize(prev, bbox, 256)
         roi_curr = crop_and_resize(curr, bbox, 256)
         if roi_prev is None or roi_curr is None:
-            # fallback to global
+    
             s, e, kp, (n1,n2) = global_metrics(prev, curr)
             method = "global_fallback"
             metrics.update({"ssim": s, "edge_change": e, "keypoint_ratio": kp, "kp_prev": n1, "kp_curr": n2, "tire_roi": None})
@@ -205,12 +204,11 @@ def main():
         metrics.update({"ssim": s, "edge_change": e, "keypoint_ratio": kp, "kp_prev": n1, "kp_curr": n2, "tire_roi": None})
         method = "global_fallback"
 
-    # compute circle loss measure (strong signal if prev had circle and curr doesn't)
+
     circ_prev = float(circle_prev_r if circle_prev_r is not None else 0.0)
     circ_curr = float(circle_curr_r if circle_curr_r is not None else 0.0)
 
-    # If the earlier choose_tire_roi returned radii as 3rd/4th values, they are numeric; if not, circ_* will be 0
-    # define circle_loss:
+
     if circ_prev > 1.0 and circ_curr < 1.0:
         circle_loss = 1.0
     elif circ_prev < 1.0 and circ_curr < 1.0:
@@ -222,16 +220,16 @@ def main():
         else:
             circle_loss = 0.0
 
-    # keypoint loss: 1 - keypoint_ratio
+    
     kp_loss = 1.0 - float(metrics["keypoint_ratio"])
 
-    # ssim loss: 1 - ssim
+    
     ssim_loss = 1.0 - float(metrics["ssim"])
 
-    # edge change (already fraction)
+
     edge_ch = float(metrics["edge_change"])
 
-    # Combine with stronger weight for circle_loss (since user wants tire detection)
+    
     w_circle = 0.40
     w_ssim = 0.25
     w_kp = 0.20
